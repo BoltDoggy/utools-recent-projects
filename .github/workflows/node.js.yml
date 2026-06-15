@@ -25,13 +25,13 @@ jobs:
         with:
           node-version: ${{matrix.node-version}}
       - name: Install command
-        run: npm install -g asar yarn
+        run: npm install -g asar pnpm
       - name: Download packages
-        run: yarn install
+        run: pnpm install
       - name: Build project
-        run: yarn build
+        run: pnpm build
       - name: Release project
-        run: yarn build-release
+        run: pnpm build-release
       - name: Detect project version
         id: project_version
         run: echo "::set-output name=project_version::$(node -p "require('./package.json').version")"

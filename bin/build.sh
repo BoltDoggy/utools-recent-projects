@@ -45,8 +45,8 @@ packageJson='{
               }'
 echo $packageJson > package.json
 # 优先使用离线安装, 加快调试速度
-yarn install --offline
-# yarn install
+pnpm install --offline
+# pnpm install
 
 node ${bin_path}/build-clean.js $root_path
 
