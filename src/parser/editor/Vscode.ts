@@ -1,6 +1,6 @@
 import { readFile, stat } from "fs/promises";
 import { isEmpty, isNil, startWith, unique, Url } from "licia";
-import { parse } from "path";
+import { dirname, join, parse } from "path";
 import { Context } from "../../Context";
 import { i18n, sentenceKey } from "../../i18n";
 import {
@@ -129,6 +129,77 @@ const parseEntries: (
     }
   }
   return items;
+};
+
+/** 将菜单缓存中序列化的 URI 对象还原为 URI 字符串, 优先用 external(原始字符串), 否则按 scheme/authority/path 重建 */
+const reviveUri: (uri: any) => string = (uri) => {
+  if (!isNil(uri) && !isEmpty(uri.external)) {
+    return uri.external;
+  }
+  let scheme = uri?.scheme || "file";
+  let authority = uri?.authority || "";
+  let pathPart = uri?.path || "";
+  let result = `${scheme}://${authority}${pathPart}`;
+  if (!isEmpty(uri?.query)) {
+    result += `?${uri.query}`;
+  }
+  if (!isEmpty(uri?.fragment)) {
+    result += `#${uri.fragment}`;
+  }
+  return result;
+};
+
+/**
+ * 新版 VS Code 不再将最近打开项写入 state.vscdb 的 history.recentlyOpenedPathsList,
+ * 而是缓存在 globalStorage/storage.json 的菜单数据 (lastKnownMenubarData) 中。
+ * 从与 vscdbPath 同目录的 storage.json 提取, 输出与旧 entries 一致的结构
+ * ({folderUri}/{fileUri}/label), 供 parseEntries 复用。
+ */
+const readMenubarRecentEntries: (
+  vscdbPath: string
+) => Promise<Array<any>> = async (vscdbPath) => {
+  try {
+    let buffer = await readFile(join(dirname(vscdbPath), "storage.json"));
+    if (isNil(buffer)) {
+      return [];
+    }
+    let menus = JSON.parse(buffer.toString())?.lastKnownMenubarData?.menus;
+    if (isNil(menus)) {
+      return [];
+    }
+    // 递归遍历菜单树收集最近打开项, 不依赖菜单本地化名称与嵌套层级
+    let entries: Array<any> = [];
+    let collect = (items: any) => {
+      if (!Array.isArray(items)) {
+        return;
+      }
+      for (let it of items) {
+        let id = it?.id;
+        let uri = it?.uri;
+        if (
+          (id === "openRecentFolder" || id === "openRecentFile") &&
+          !isNil(uri)
+        ) {
+          let uriString = reviveUri(uri);
+          if (id === "openRecentFolder") {
+            entries.push({ folderUri: uriString, label: it.label });
+          } else {
+            entries.push({ fileUri: uriString, label: it.label });
+          }
+        }
+        if (!isNil(it?.submenu?.items)) {
+          collect(it.submenu.items);
+        }
+      }
+    };
+    for (let menuName in menus) {
+      collect(menus[menuName]?.items);
+    }
+    return entries;
+  } catch (error) {
+    console.error("Read menubar recent entries failure", vscdbPath, error);
+    return [];
+  }
 };
 
 export class VscodeApplicationImpl extends ApplicationCacheConfigAndExecutorImpl<VscodeProjectItemImpl> {
@@ -300,22 +371,26 @@ export class Vscode1640ApplicationImpl extends ApplicationCacheConfigAndExecutor
       this.config,
       "select value as result from ItemTable where key = 'history.recentlyOpenedPathsList'"
     );
+    let entries: any = undefined;
     if (!isEmpty(results)) {
-      let row = results[0];
-      let source = row["result"] as string;
+      let source = results[0]["result"] as string;
       if (!isEmpty(source)) {
-        return await parseEntries(
-          JSON.parse(source)["entries"],
-          context,
-          this.openInNew,
-          this.isWindows,
-          this.icon,
-          this.executor,
-          this.sortByAccessTime
-        );
+        entries = JSON.parse(source)["entries"];
       }
     }
-    return [];
+    // 新版 VS Code 不再将最近项写入 state.vscdb, fallback 到同目录 storage.json 的菜单缓存
+    if (isNil(entries)) {
+      entries = await readMenubarRecentEntries(this.config);
+    }
+    return await parseEntries(
+      entries,
+      context,
+      this.openInNew,
+      this.isWindows,
+      this.icon,
+      this.executor,
+      this.sortByAccessTime
+    );
   }
 
   openInNewId(nativeId: string) {
