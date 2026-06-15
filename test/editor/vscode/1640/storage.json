@@ -1,0 +1,28 @@
+{
+  "lastKnownMenubarData": {
+    "menus": {
+      "File": {
+        "items": [
+          {
+            "id": "openRecentFolder",
+            "label": "/Users/lanyuanxiaoyao/notes",
+            "uri": {
+              "$mid": 1,
+              "path": "/Users/lanyuanxiaoyao/notes",
+              "scheme": "file"
+            }
+          },
+          {
+            "id": "openRecentFile",
+            "label": "/Users/lanyuanxiaoyao/notes.log",
+            "uri": {
+              "$mid": 1,
+              "path": "/Users/lanyuanxiaoyao/notes.log",
+              "scheme": "file"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

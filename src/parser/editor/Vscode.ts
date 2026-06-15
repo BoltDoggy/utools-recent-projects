@@ -367,10 +367,16 @@ export class Vscode1640ApplicationImpl extends ApplicationCacheConfigAndExecutor
     context: Context
   ): Promise<Array<VscodeProjectItemImpl>> {
     // language=SQLite
-    let results = await queryFromSqlite(
-      this.config,
-      "select value as result from ItemTable where key = 'history.recentlyOpenedPathsList'"
-    );
+    let results: Array<any> = [];
+    try {
+      results = await queryFromSqlite(
+        this.config,
+        "select value as result from ItemTable where key = 'history.recentlyOpenedPathsList'"
+      );
+    } catch (error) {
+      // state.vscdb 可能被 VS Code 占用或损坏, 直接 fallback 到菜单缓存
+      console.error("Query state.vscdb failure", this.config, error);
+    }
     let entries: any = undefined;
     if (!isEmpty(results)) {
       let source = results[0]["result"] as string;
@@ -378,8 +384,8 @@ export class Vscode1640ApplicationImpl extends ApplicationCacheConfigAndExecutor
         entries = JSON.parse(source)["entries"];
       }
     }
-    // 新版 VS Code 不再将最近项写入 state.vscdb, fallback 到同目录 storage.json 的菜单缓存
-    if (isNil(entries)) {
+    // 新版 VS Code 不再将最近项写入 state.vscdb, 当无记录/为空/查询失败时 fallback 到同目录 storage.json 的菜单缓存
+    if (isNil(entries) || isEmpty(entries)) {
       entries = await readMenubarRecentEntries(this.config);
     }
     return await parseEntries(
