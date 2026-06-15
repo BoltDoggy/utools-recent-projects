@@ -197,29 +197,10 @@ const readMenubarRecentEntries: (
       }
     };
 
-    // 1. backupWorkspaces: 当前/最近打开, 优先级最高
-    let backupWorkspaces = storage?.backupWorkspaces;
-    if (!isNil(backupWorkspaces)) {
-      let idx = 0;
-      for (let workspace of backupWorkspaces.workspaces ?? []) {
-        let configPath = workspace?.configURIPath ?? workspace?.configPath;
-        if (!isEmpty(configPath)) {
-          add({ workspace: { configPath }, label: configPath }, now, idx++);
-        }
-      }
-      for (let folder of backupWorkspaces.folders ?? []) {
-        let folderUri = folder?.folderUri;
-        if (!isEmpty(folderUri)) {
-          add({ folderUri, label: folderUri }, now, idx++);
-        }
-      }
-    }
-
-    // 2. lastKnownMenubarData 菜单缓存: 最近打开顺序
+    // 1. lastKnownMenubarData 菜单缓存: 最近打开顺序, 优先级最高
     let menus = storage?.lastKnownMenubarData?.menus;
     if (!isNil(menus)) {
       let idx = 0;
-      let menuBase = now - 24 * 60 * 60 * 1000; // 次于 backupWorkspaces
       let collect = (items: any) => {
         if (!Array.isArray(items)) {
           return;
@@ -233,16 +214,16 @@ const readMenubarRecentEntries: (
           ) {
             let uriString = reviveUri(uri);
             if (id === "openRecentFolder") {
-              add({ folderUri: uriString, label: it.label }, menuBase, idx++);
+              add({ folderUri: uriString, label: it.label }, now, idx++);
             } else if (uriString.endsWith(".code-workspace")) {
               // VS Code 工作区文件在菜单缓存里通常以 openRecentFile 出现, 识别为 workspace
               add(
                 { workspace: { configPath: uriString }, label: it.label },
-                menuBase,
+                now,
                 idx++
               );
             } else {
-              add({ fileUri: uriString, label: it.label }, menuBase, idx++);
+              add({ fileUri: uriString, label: it.label }, now, idx++);
             }
           }
           if (!isNil(it?.submenu?.items)) {
@@ -252,6 +233,25 @@ const readMenubarRecentEntries: (
       };
       for (let menuName in menus) {
         collect(menus[menuName]?.items);
+      }
+    }
+
+    // 2. backupWorkspaces: 当前/最近打开的窗口, 作为补充
+    let backupWorkspaces = storage?.backupWorkspaces;
+    if (!isNil(backupWorkspaces)) {
+      let idx = 0;
+      let backupBase = now - 24 * 60 * 60 * 1000; // 次于菜单缓存
+      for (let workspace of backupWorkspaces.workspaces ?? []) {
+        let configPath = workspace?.configURIPath ?? workspace?.configPath;
+        if (!isEmpty(configPath)) {
+          add({ workspace: { configPath }, label: configPath }, backupBase, idx++);
+        }
+      }
+      for (let folder of backupWorkspaces.folders ?? []) {
+        let folderUri = folder?.folderUri;
+        if (!isEmpty(folderUri)) {
+          add({ folderUri, label: folderUri }, backupBase, idx++);
+        }
       }
     }
 
