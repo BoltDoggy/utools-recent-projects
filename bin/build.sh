@@ -44,9 +44,9 @@ packageJson='{
                 }
               }'
 echo $packageJson > package.json
-# 优先使用离线安装, 加快调试速度
-pnpm install --offline
-# pnpm install
+# --ignore-workspace: 避免被项目根 pnpm-workspace.yaml 纳入工作区, 导致本地 node_modules 不生成
+# --node-linker=hoisted: 生成传统扁平 node_modules, 便于 cp 打包进 uTools 插件
+pnpm install --ignore-workspace --node-linker=hoisted
 
 node ${bin_path}/build-clean.js $root_path
 
