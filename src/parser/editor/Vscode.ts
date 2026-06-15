@@ -209,14 +209,19 @@ const readMenubarRecentEntries: (
           let id = it?.id;
           let uri = it?.uri;
           if (
-            (id === "openRecentFolder" || id === "openRecentFile") &&
+            (id === "openRecentFolder" ||
+              id === "openRecentFile" ||
+              id === "openRecentWorkspace") &&
             !isNil(uri)
           ) {
             let uriString = reviveUri(uri);
             if (id === "openRecentFolder") {
               add({ folderUri: uriString, label: it.label }, now, idx++);
-            } else if (uriString.endsWith(".code-workspace")) {
-              // VS Code 工作区文件在菜单缓存里通常以 openRecentFile 出现, 识别为 workspace
+            } else if (
+              id === "openRecentWorkspace" ||
+              uriString.endsWith(".code-workspace")
+            ) {
+              // openRecentWorkspace 或 .code-workspace 结尾的文件识别为工作区
               add(
                 { workspace: { configPath: uriString }, label: it.label },
                 now,

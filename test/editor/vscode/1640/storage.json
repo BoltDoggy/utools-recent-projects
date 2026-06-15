@@ -56,6 +56,15 @@
               "path": "/Users/lanyuanxiaoyao/notes.code-workspace",
               "scheme": "file"
             }
+          },
+          {
+            "id": "openRecentWorkspace",
+            "label": "/Users/lanyuanxiaoyao/menu-workspace (工作区)",
+            "uri": {
+              "$mid": 1,
+              "path": "/Users/lanyuanxiaoyao/menu-workspace.code-workspace",
+              "scheme": "file"
+            }
           }
         ]
       }
