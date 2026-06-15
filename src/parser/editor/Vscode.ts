@@ -57,10 +57,6 @@ const parseEntries: (
         uri,
         tag = '';
       if (!isEmpty(folderUri)) {
-        /** 如果存在文件夹内 workspace 打开历史, 就不需要显示文件夹 */
-        if (Array.from(entries).findIndex((e: any) => e.workspace?.configPath === folderUri + "/mono.code-workspace") !== -1) {
-          continue;
-        }
         uri = folderUri;
       } else if (!isEmpty(fileUri)) {
         uri = fileUri;
