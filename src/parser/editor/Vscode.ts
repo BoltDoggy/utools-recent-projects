@@ -108,11 +108,12 @@ const parseEntries: (
         }
       }
 
-      let accessTime = 0;
+      let accessTime = element["datetime"] ?? 0;
       if (sortByAccessTime && exists) {
         try {
           accessTime = (await stat(path)).atimeMs;
         } catch (error) {
+          // remote 或不可访问路径保留 entry 自带的伪时间戳
           console.error("Get accessTime failure", path, error);
         }
       }
@@ -182,37 +183,43 @@ const readMenubarRecentEntries: (
     let storage = JSON.parse(buffer.toString());
     let entries: Array<any> = [];
     let seen = new Set<string>();
-    let add = (entry: any) => {
+    let now = Date.now();
+    // 用时间戳区分来源优先级: backupWorkspaces(当前打开) > menu缓存(最近菜单) > profileAssociations(历史分配)
+    let add = (entry: any, baseTime: number, index: number) => {
       let key = entryKey(entry);
       if (!isEmpty(key)) {
         let k = key as string;
         if (!seen.has(k)) {
           seen.add(k);
+          entry.datetime = baseTime - index * 1000;
           entries.push(entry);
         }
       }
     };
 
-    // 1. backupWorkspaces
+    // 1. backupWorkspaces: 当前/最近打开, 优先级最高
     let backupWorkspaces = storage?.backupWorkspaces;
     if (!isNil(backupWorkspaces)) {
+      let idx = 0;
       for (let workspace of backupWorkspaces.workspaces ?? []) {
         let configPath = workspace?.configURIPath ?? workspace?.configPath;
         if (!isEmpty(configPath)) {
-          add({ workspace: { configPath }, label: configPath });
+          add({ workspace: { configPath }, label: configPath }, now, idx++);
         }
       }
       for (let folder of backupWorkspaces.folders ?? []) {
         let folderUri = folder?.folderUri;
         if (!isEmpty(folderUri)) {
-          add({ folderUri, label: folderUri });
+          add({ folderUri, label: folderUri }, now, idx++);
         }
       }
     }
 
-    // 2. lastKnownMenubarData 菜单缓存
+    // 2. lastKnownMenubarData 菜单缓存: 最近打开顺序
     let menus = storage?.lastKnownMenubarData?.menus;
     if (!isNil(menus)) {
+      let idx = 0;
+      let menuBase = now - 24 * 60 * 60 * 1000; // 次于 backupWorkspaces
       let collect = (items: any) => {
         if (!Array.isArray(items)) {
           return;
@@ -226,15 +233,16 @@ const readMenubarRecentEntries: (
           ) {
             let uriString = reviveUri(uri);
             if (id === "openRecentFolder") {
-              add({ folderUri: uriString, label: it.label });
+              add({ folderUri: uriString, label: it.label }, menuBase, idx++);
             } else if (uriString.endsWith(".code-workspace")) {
               // VS Code 工作区文件在菜单缓存里通常以 openRecentFile 出现, 识别为 workspace
-              add({
-                workspace: { configPath: uriString },
-                label: it.label,
-              });
+              add(
+                { workspace: { configPath: uriString }, label: it.label },
+                menuBase,
+                idx++
+              );
             } else {
-              add({ fileUri: uriString, label: it.label });
+              add({ fileUri: uriString, label: it.label }, menuBase, idx++);
             }
           }
           if (!isNil(it?.submenu?.items)) {
@@ -247,15 +255,21 @@ const readMenubarRecentEntries: (
       }
     }
 
-    // 3. profileAssociations
+    // 3. profileAssociations: 历史工作区分配记录, 兜底
     let profileAssociations = storage?.profileAssociations?.workspaces;
     if (!isNil(profileAssociations)) {
+      let idx = 0;
+      let profileBase = now - 7 * 24 * 60 * 60 * 1000; // 最旧
       for (let workspaceUri in profileAssociations) {
         if (!isEmpty(workspaceUri)) {
           if (workspaceUri.endsWith(".code-workspace")) {
-            add({ workspace: { configPath: workspaceUri }, label: workspaceUri });
+            add(
+              { workspace: { configPath: workspaceUri }, label: workspaceUri },
+              profileBase,
+              idx++
+            );
           } else {
-            add({ folderUri: workspaceUri, label: workspaceUri });
+            add({ folderUri: workspaceUri, label: workspaceUri }, profileBase, idx++);
           }
         }
       }
