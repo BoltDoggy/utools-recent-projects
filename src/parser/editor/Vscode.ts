@@ -155,6 +155,15 @@ const reviveUri: (uri: any) => string = (uri) => {
   return result;
 };
 
+/** 生成 entry 的去重 key */
+const entryKey: (entry: any) => string | undefined = (entry) => {
+  if (!isEmpty(entry?.folderUri)) return `folder:${entry.folderUri}`;
+  if (!isEmpty(entry?.fileUri)) return `file:${entry.fileUri}`;
+  if (!isEmpty(entry?.workspace?.configPath))
+    return `workspace:${entry.workspace.configPath}`;
+  return undefined;
+};
+
 /**
  * 新版 VS Code 不再将最近打开项写入 state.vscdb 的 history.recentlyOpenedPathsList,
  * 而是缓存在 globalStorage/storage.json 中。
@@ -173,11 +182,19 @@ const readMenubarRecentEntries: (
     }
     let storage = JSON.parse(buffer.toString());
     let entries: Array<any> = [];
+    let seen = new Set<string>();
     let now = Date.now();
     // 用时间戳区分来源优先级: menu缓存(最近菜单) > backupWorkspaces(当前打开) > profileAssociations(历史分配)
     let add = (entry: any, baseTime: number, index: number) => {
-      entry.datetime = baseTime - index * 1000;
-      entries.push(entry);
+      let key = entryKey(entry);
+      if (!isEmpty(key)) {
+        let k = key as string;
+        if (!seen.has(k)) {
+          seen.add(k);
+          entry.datetime = baseTime - index * 1000;
+          entries.push(entry);
+        }
+      }
     };
 
     // 1. lastKnownMenubarData 菜单缓存: 最近打开顺序, 优先级最高
