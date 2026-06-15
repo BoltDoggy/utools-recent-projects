@@ -95,12 +95,17 @@ const parseEntries: (
 
       let commandText = `"${executor}" ${args} "${path}"`;
 
-      // 对 remote folder 进行处理
+      // 对 remote URI 进行处理
       if (startWith(uri, "vscode-remote")) {
         let label = element["label"] ?? uriParsed;
         exists = true;
         description = label;
-        commandText = `"${executor}" --folder-uri "${uriParsed}"`;
+        if (uri.endsWith(".code-workspace")) {
+          // remote 工作区文件用 --file-uri 打开, --folder-uri 会导致空白窗口
+          commandText = `"${executor}" --file-uri "${uriParsed}"`;
+        } else {
+          commandText = `"${executor}" --folder-uri "${uriParsed}"`;
+        }
       }
 
       let accessTime = 0;
@@ -149,11 +154,22 @@ const reviveUri: (uri: any) => string = (uri) => {
   return result;
 };
 
+/** 生成 entry 的去重 key */
+const entryKey: (entry: any) => string | undefined = (entry) => {
+  if (!isEmpty(entry?.folderUri)) return `folder:${entry.folderUri}`;
+  if (!isEmpty(entry?.fileUri)) return `file:${entry.fileUri}`;
+  if (!isEmpty(entry?.workspace?.configPath))
+    return `workspace:${entry.workspace.configPath}`;
+  return undefined;
+};
+
 /**
  * 新版 VS Code 不再将最近打开项写入 state.vscdb 的 history.recentlyOpenedPathsList,
- * 而是缓存在 globalStorage/storage.json 的菜单数据 (lastKnownMenubarData) 中。
- * 从与 vscdbPath 同目录的 storage.json 提取, 输出与旧 entries 一致的结构
- * ({folderUri}/{fileUri}/label), 供 parseEntries 复用。
+ * 而是缓存在 globalStorage/storage.json 中。
+ * 按以下优先级合并, 输出与旧 entries 一致的结构 ({folderUri}/{fileUri}/workspace/label), 供 parseEntries 复用:
+ * 1. backupWorkspaces: 当前/最近打开的工作区和文件夹
+ * 2. lastKnownMenubarData 菜单缓存: 最近打开项
+ * 3. profileAssociations: VS Code 分配过配置文件的工作区, 常包含 remote 工作区
  */
 const readMenubarRecentEntries: (
   vscdbPath: string
@@ -163,38 +179,88 @@ const readMenubarRecentEntries: (
     if (isNil(buffer)) {
       return [];
     }
-    let menus = JSON.parse(buffer.toString())?.lastKnownMenubarData?.menus;
-    if (isNil(menus)) {
-      return [];
-    }
-    // 递归遍历菜单树收集最近打开项, 不依赖菜单本地化名称与嵌套层级
+    let storage = JSON.parse(buffer.toString());
     let entries: Array<any> = [];
-    let collect = (items: any) => {
-      if (!Array.isArray(items)) {
-        return;
-      }
-      for (let it of items) {
-        let id = it?.id;
-        let uri = it?.uri;
-        if (
-          (id === "openRecentFolder" || id === "openRecentFile") &&
-          !isNil(uri)
-        ) {
-          let uriString = reviveUri(uri);
-          if (id === "openRecentFolder") {
-            entries.push({ folderUri: uriString, label: it.label });
-          } else {
-            entries.push({ fileUri: uriString, label: it.label });
-          }
-        }
-        if (!isNil(it?.submenu?.items)) {
-          collect(it.submenu.items);
+    let seen = new Set<string>();
+    let add = (entry: any) => {
+      let key = entryKey(entry);
+      if (!isEmpty(key)) {
+        let k = key as string;
+        if (!seen.has(k)) {
+          seen.add(k);
+          entries.push(entry);
         }
       }
     };
-    for (let menuName in menus) {
-      collect(menus[menuName]?.items);
+
+    // 1. backupWorkspaces
+    let backupWorkspaces = storage?.backupWorkspaces;
+    if (!isNil(backupWorkspaces)) {
+      for (let workspace of backupWorkspaces.workspaces ?? []) {
+        let configPath = workspace?.configURIPath ?? workspace?.configPath;
+        if (!isEmpty(configPath)) {
+          add({ workspace: { configPath }, label: configPath });
+        }
+      }
+      for (let folder of backupWorkspaces.folders ?? []) {
+        let folderUri = folder?.folderUri;
+        if (!isEmpty(folderUri)) {
+          add({ folderUri, label: folderUri });
+        }
+      }
     }
+
+    // 2. lastKnownMenubarData 菜单缓存
+    let menus = storage?.lastKnownMenubarData?.menus;
+    if (!isNil(menus)) {
+      let collect = (items: any) => {
+        if (!Array.isArray(items)) {
+          return;
+        }
+        for (let it of items) {
+          let id = it?.id;
+          let uri = it?.uri;
+          if (
+            (id === "openRecentFolder" || id === "openRecentFile") &&
+            !isNil(uri)
+          ) {
+            let uriString = reviveUri(uri);
+            if (id === "openRecentFolder") {
+              add({ folderUri: uriString, label: it.label });
+            } else if (uriString.endsWith(".code-workspace")) {
+              // VS Code 工作区文件在菜单缓存里通常以 openRecentFile 出现, 识别为 workspace
+              add({
+                workspace: { configPath: uriString },
+                label: it.label,
+              });
+            } else {
+              add({ fileUri: uriString, label: it.label });
+            }
+          }
+          if (!isNil(it?.submenu?.items)) {
+            collect(it.submenu.items);
+          }
+        }
+      };
+      for (let menuName in menus) {
+        collect(menus[menuName]?.items);
+      }
+    }
+
+    // 3. profileAssociations
+    let profileAssociations = storage?.profileAssociations?.workspaces;
+    if (!isNil(profileAssociations)) {
+      for (let workspaceUri in profileAssociations) {
+        if (!isEmpty(workspaceUri)) {
+          if (workspaceUri.endsWith(".code-workspace")) {
+            add({ workspace: { configPath: workspaceUri }, label: workspaceUri });
+          } else {
+            add({ folderUri: workspaceUri, label: workspaceUri });
+          }
+        }
+      }
+    }
+
     return entries;
   } catch (error) {
     console.error("Read menubar recent entries failure", vscdbPath, error);
@@ -384,7 +450,7 @@ export class Vscode1640ApplicationImpl extends ApplicationCacheConfigAndExecutor
         entries = JSON.parse(source)["entries"];
       }
     }
-    // 新版 VS Code 不再将最近项写入 state.vscdb, 当无记录/为空/查询失败时 fallback 到同目录 storage.json 的菜单缓存
+    // 新版 VS Code 不再将最近项写入 state.vscdb, 当无记录/为空/查询失败时 fallback 到同目录 storage.json
     if (isNil(entries) || isEmpty(entries)) {
       entries = await readMenubarRecentEntries(this.config);
     }
